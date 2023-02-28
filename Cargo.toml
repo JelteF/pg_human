@@ -16,6 +16,7 @@ pg15 = ["pgx/pg15", "pgx-tests/pg15"]
 pg_test = []
 
 [dependencies]
+itertools = "0.10.5"
 pgx = "=0.7.2"
 [dependencies.reqwest]
 version = "0.11.14"
