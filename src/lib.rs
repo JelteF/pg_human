@@ -3,8 +3,8 @@ use pgx::prelude::*;
 pgx::pg_module_magic!();
 
 #[pg_extern]
-fn hello_pg_gpt() -> &'static str {
-    "Hello, pg_gpt"
+fn gpt_feeling_lucky() -> Result<String, reqwest::Error> {
+    reqwest::blocking::get("https://api.ipify.or")?.text()
 }
 
 #[cfg(any(test, feature = "pg_test"))]
