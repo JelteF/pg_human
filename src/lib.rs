@@ -190,6 +190,7 @@ fn gpt_feeling_lucky() -> Result<String, reqwest::Error> {
             })
             .collect()
     });
+    // TODO: Add primary keys and foreign keys
     let db_description = DatabaseDescription { tables };
     Ok(format!("{}", db_description))
     // reqwest::blocking::get("https://api.ipify.org")?.text()
