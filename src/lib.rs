@@ -3,6 +3,8 @@ use pgx::guc::{GucContext, GucFlags, GucRegistry, GucSetting};
 use pgx::prelude::*;
 use pgx::spi::quote_qualified_identifier;
 use std::fmt;
+use anyhow::Result;
+use openai_api;
 
 pgx::pg_module_magic!();
 
@@ -138,15 +140,21 @@ fn question_prompt(question: &str) -> String {
 {db_description:#}
 
 
-Could you give me an SQL query that answers the following question:
-{question}?"
+Could you give me a PostgreSQL query to {question}."
     )
 }
 
 #[pg_extern]
 #[tokio::main(flavor = "current_thread")]
-async fn get_ip() -> Result<String, reqwest::Error> {
-    reqwest::get("https://api.ipify.org").await?.text().await
+async fn give_me_a_query_to(question: &str) -> Result<String> {
+    let client = openai_api::Client::new(&API_KEY.get().expect("pg_gpt.api_key is not set"));
+    let prompt = question_prompt(question);
+    let args = openai_api::api::CompletionArgs::builder()
+        .prompt(prompt)
+        .engine("text-davinci-003")
+        .max_tokens(1000);
+    let response = client.complete_prompt(args.build()?).await?;
+    Ok(response.to_string())
 }
 
 #[cfg(any(test, feature = "pg_test"))]
