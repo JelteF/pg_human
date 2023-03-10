@@ -1,8 +1,7 @@
 use itertools::Itertools;
-use pgx::guc::{GucContext, GucRegistry, GucSetting};
-use pgx::pg_sys;
+use pgx::guc::{GucContext, GucFlags, GucRegistry, GucSetting};
 use pgx::prelude::*;
-use std::ffi::{CStr, CString};
+use pgx::spi::quote_qualified_identifier;
 use std::fmt;
 
 pgx::pg_module_magic!();
@@ -18,6 +17,7 @@ pub extern "C" fn _PG_init() {
         "The OpenAI API key that is used by pg_gpt",
         &API_KEY,
         GucContext::Userset,
+        GucFlags::default(),
     );
 }
 
@@ -47,20 +47,6 @@ struct TableDescription {
     schema: String,
     name: String,
     columns: Vec<ColumnDescription>,
-}
-
-fn quote_qualified_identifier<StringLike: AsRef<str>>(
-    qualifier: StringLike,
-    ident: StringLike,
-) -> String {
-    let quoted_cstr = unsafe {
-        let qualifier_cstr = CString::new(qualifier.as_ref()).unwrap();
-        let ident_cstr = CString::new(ident.as_ref()).unwrap();
-        let quoted_ptr =
-            pg_sys::quote_qualified_identifier(qualifier_cstr.as_ptr(), ident_cstr.as_ptr());
-        CStr::from_ptr(quoted_ptr)
-    };
-    quoted_cstr.to_str().unwrap().to_string()
 }
 
 impl fmt::Display for TableDescription {

@@ -17,7 +17,7 @@ pg_test = []
 
 [dependencies]
 itertools = "0.10.5"
-pgx = "=0.7.2"
+pgx = "=0.7.3"
 tokio = { version = "1", features = ["full"] }
 [dependencies.reqwest]
 version = "0.11.14"
@@ -25,7 +25,7 @@ default-features = false
 features = ["default-tls"]
 
 [dev-dependencies]
-pgx-tests = "=0.7.2"
+pgx-tests = "=0.7.3"
 
 [profile.dev]
 panic = "unwind"
