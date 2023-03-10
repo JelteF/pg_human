@@ -104,6 +104,7 @@ impl fmt::Display for ColumnDescription {
 }
 
 impl DatabaseDescription {
+    #[must_use]
     fn new() -> DatabaseDescription {
         let query = r#"
             SELECT
@@ -143,9 +144,23 @@ impl DatabaseDescription {
     }
 }
 
+#[must_use]
+fn question_prompt(question: &str) -> String {
+    let db_description = DatabaseDescription::new();
+    format!(
+        "Given the following Postgres schema:
+{db_description:#}
+
+
+Could you give me an SQL query that answers the following question:
+{question}?"
+    )
+}
+
 #[pg_extern]
-fn gpt_feeling_lucky() -> Result<String, reqwest::Error> {
-    reqwest::blocking::get("https://api.ipify.org")?.text()
+#[tokio::main(flavor = "current_thread")]
+async fn get_ip() -> Result<String, reqwest::Error> {
+    reqwest::get("https://api.ipify.org").await?.text().await
 }
 
 #[cfg(any(test, feature = "pg_test"))]
@@ -210,6 +225,10 @@ CREATE TABLE public.impressions(
     user_data jsonb
 );"#;
         assert_eq!(expected_schema, format!("{:#}", DatabaseDescription::new()));
+    }
+
+    #[pg_test]
+    fn test_guc() {
         assert_eq!(Some("ABC".to_string()), API_KEY.get())
     }
 }
