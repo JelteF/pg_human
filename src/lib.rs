@@ -1,10 +1,14 @@
+use anyhow::Result;
 use itertools::Itertools;
+use openai::{
+    chat::{ChatCompletion, ChatCompletionMessage, ChatCompletionMessageRole},
+    set_key,
+};
 use pgx::guc::{GucContext, GucFlags, GucRegistry, GucSetting};
 use pgx::prelude::*;
 use pgx::spi::quote_qualified_identifier;
+use pgx::JsonB;
 use std::fmt;
-use anyhow::Result;
-use openai_api;
 
 pgx::pg_module_magic!();
 
@@ -133,28 +137,73 @@ impl DatabaseDescription {
 }
 
 #[must_use]
-fn question_prompt(question: &str) -> String {
+fn question_prompt(question: &str) -> Vec<ChatCompletionMessage> {
     let db_description = DatabaseDescription::new();
-    format!(
-        "Given the following Postgres schema:
-{db_description:#}
+    vec![
+        ChatCompletionMessage {
+            role: ChatCompletionMessageRole::System,
+            content: format!("You are a PostgreSQL expert"),
+            name: None,
+        },
+        ChatCompletionMessage {
+            role: ChatCompletionMessageRole::User,
+            content: format!("My database schema looks like this: {db_description}."),
+            name: None,
+        },
+        ChatCompletionMessage {
+            role: ChatCompletionMessageRole::User,
+            content: format!("Could you give me a PostgreSQL query to {question}. Only respond with the SQL query, so no other additional text."),
+            name: None,
+        },
+    ]
+}
 
-
-Could you give me a PostgreSQL query to {question}."
-    )
+async fn complete_prompt(prompt: Vec<ChatCompletionMessage>) -> Result<String> {
+    set_key(API_KEY.get().expect("pg_gpt.api_key is not set"));
+    let mut response = ChatCompletion::builder("gpt-3.5-turbo", prompt)
+        .create()
+        .await
+        .unwrap()
+        .unwrap();
+    Ok(response.choices.remove(0).message.content)
 }
 
 #[pg_extern]
 #[tokio::main(flavor = "current_thread")]
 async fn give_me_a_query_to(question: &str) -> Result<String> {
-    let client = openai_api::Client::new(&API_KEY.get().expect("pg_gpt.api_key is not set"));
     let prompt = question_prompt(question);
-    let args = openai_api::api::CompletionArgs::builder()
-        .prompt(prompt)
-        .engine("text-davinci-003")
-        .max_tokens(1000);
-    let response = client.complete_prompt(args.build()?).await?;
-    Ok(response.to_string())
+    complete_prompt(prompt).await
+}
+
+#[pg_extern]
+#[tokio::main(flavor = "current_thread")]
+async fn im_feeling_lucky(
+    question: &str,
+) -> Result<TableIterator<'static, (name!(i, i32), name!(data, JsonB))>> {
+    let prompt = question_prompt(question);
+    let sql = complete_prompt(prompt).await?;
+    let cleaned_sql = sql.trim_end_matches([';', '\n', ' ']);
+    notice!("Executing query:\n{sql}");
+    // let sql = "SELECT 1 as mynumber";
+    Spi::connect(|client| {
+        let mut results = Vec::new();
+        let mut tup_table = client.select(
+            &format!(
+                "SELECT to_jsonb(generated_query) as data FROM ({cleaned_sql}) generated_query"
+            ),
+            None,
+            None,
+        )?;
+
+        let mut i = 0;
+        while let Some(row) = tup_table.next() {
+            let json_row = row["data"].value::<JsonB>()?.unwrap();
+            results.push((i, json_row));
+            i += 1;
+        }
+
+        Ok(TableIterator::new(results.into_iter()))
+    })
 }
 
 #[cfg(any(test, feature = "pg_test"))]
