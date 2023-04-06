@@ -185,7 +185,7 @@ fn question_prompt(question: &str) -> Vec<ChatCompletionMessage> {
     vec![
         ChatCompletionMessage {
             role: ChatCompletionMessageRole::System,
-            content: format!("You are a PostgreSQL expert"),
+            content: "You are a PostgreSQL expert",
             name: None,
         },
         ChatCompletionMessage {
