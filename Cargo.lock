@@ -1128,7 +1128,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "pg_gpt"
+name = "pg_human"
 version = "0.0.0"
 dependencies = [
  "anyhow",

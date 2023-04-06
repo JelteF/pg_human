@@ -20,9 +20,9 @@ static API_KEY: GucSetting<Option<&'static str>> = GucSetting::new(None);
 #[pg_guard]
 pub extern "C" fn _PG_init() {
     GucRegistry::define_string_guc(
-        "pg_gpt.api_key",
-        "The OpenAI API key that is used by pg_gpt",
-        "The OpenAI API key that is used by pg_gpt",
+        "pg_human.api_key",
+        "The OpenAI API key that is used by pg_human",
+        "The OpenAI API key that is used by pg_human",
         &API_KEY,
         GucContext::Userset,
         GucFlags::default(),
@@ -195,20 +195,20 @@ fn question_prompt(question: &str) -> Vec<ChatCompletionMessage> {
         },
         ChatCompletionMessage {
             role: ChatCompletionMessageRole::User,
-            content: format!("Given that schema, could you give me a PostgreSQL query to do the following action: {question}.\n Only respond with the SQL query, so no other additional text. Only use the tables and columns provided in the schema."),
+            content: format!("Given that schema, could you give me a PostgreSQL query to do the following action: {question}.\n Only respond with the SQL code, so no other additional text. Only use the tables and columns provided in the schema."),
             name: None,
         },
     ]
 }
 
 async fn complete_prompt(prompt: Vec<ChatCompletionMessage>) -> Result<String> {
-    set_key(API_KEY.get().expect("pg_gpt.api_key is not set"));
+    set_key(API_KEY.get().expect("pg_human.api_key is not set"));
     let request = ChatCompletion::builder("gpt-3.5-turbo", prompt)
         .create();
 
     // Sometimes the API seems to get stuck, give up after 10 seconds
     // TODO: Use statement timeout instead
-    let mut response = timeout(Duration::from_secs(10), request)
+    let mut response = timeout(Duration::from_secs(20), request)
         .await???;
     Ok(response.choices.remove(0).message.content)
 }
@@ -249,6 +249,22 @@ async fn im_feeling_lucky(
         }
 
         Ok(TableIterator::new(results.into_iter()))
+    })
+}
+
+#[pg_extern]
+#[tokio::main(flavor = "current_thread")]
+async fn im_feeling_lucky_dml(question: &str) -> Result<()>{
+    let prompt = question_prompt(question);
+    let sql = complete_prompt(prompt).await?;
+    notice!("Executing:\n{sql}");
+    Spi::connect(|mut client| {
+        client.update(
+            &sql,
+            None,
+            None,
+        )?;
+        Ok(())
     })
 }
 
@@ -332,6 +348,6 @@ pub mod pg_test {
 
     pub fn postgresql_conf_options() -> Vec<&'static str> {
         // return any postgresql.conf settings that are required for your tests
-        vec!["pg_gpt.api_key = 'ABC'"]
+        vec!["pg_human.api_key = 'ABC'"]
     }
 }
