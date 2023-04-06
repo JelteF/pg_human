@@ -16,7 +16,7 @@ CREATE TABLE campaigns (
   blacklisted_site_urls text[],
   created_at timestamp without time zone NOT NULL,
   updated_at timestamp without time zone NOT NULL,
-  PRIMARY KEY (company_id, id)
+  PRIMARY KEY (id)
 );
 
 CREATE TABLE ads (
@@ -30,35 +30,9 @@ CREATE TABLE ads (
   clicks_count bigint DEFAULT 0,
   created_at timestamp without time zone NOT NULL,
   updated_at timestamp without time zone NOT NULL,
-  PRIMARY KEY (company_id, id),
-  FOREIGN KEY (company_id, campaign_id)
-    REFERENCES campaigns (company_id, id)
-);
-
-CREATE TABLE clicks (
-  id bigserial,
-  company_id bigint,
-  ad_id bigint,
-  clicked_at timestamp without time zone NOT NULL,
-  site_url text NOT NULL,
-  cost_per_click_usd numeric(20,10),
-  user_ip inet NOT NULL,
-  user_data jsonb NOT NULL,
-  PRIMARY KEY (company_id, id),
-  FOREIGN KEY (company_id, ad_id)
-    REFERENCES ads (company_id, id)
-);
-
-CREATE TABLE impressions (
-  id bigserial,
-  company_id bigint,
-  ad_id bigint,
-  seen_at timestamp without time zone NOT NULL,
-  site_url text NOT NULL,
-  cost_per_impression_usd numeric(20,10),
-  user_ip inet NOT NULL,
-  user_data jsonb NOT NULL,
-  PRIMARY KEY (company_id, id),
-  FOREIGN KEY (company_id, ad_id)
-    REFERENCES ads (company_id, id)
+  PRIMARY KEY (id),
+  FOREIGN KEY (campaign_id)
+    REFERENCES campaigns (id),
+  FOREIGN KEY (company_id)
+    REFERENCES companies (id)
 );

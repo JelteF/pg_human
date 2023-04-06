@@ -9,6 +9,8 @@ use pgx::prelude::*;
 use pgx::spi::quote_qualified_identifier;
 use pgx::JsonB;
 use std::fmt;
+use tokio::time::timeout;
+use std::time::Duration;
 
 pgx::pg_module_magic!();
 
@@ -39,9 +41,9 @@ impl fmt::Display for DatabaseDescription {
                 if i > 0 {
                     write!(formatter, "\n\n")?
                 }
-                write!(formatter, "{:#}", table)?
+                write!(formatter, "{table:#}")?
             } else {
-                write!(formatter, "{}", table)?
+                write!(formatter, "{table}")?
             }
         }
         Ok(())
@@ -53,6 +55,7 @@ struct TableDescription {
     schema: String,
     name: String,
     columns: Vec<ColumnDescription>,
+    constraints: Vec<String>,
 }
 
 impl fmt::Display for TableDescription {
@@ -67,12 +70,20 @@ impl fmt::Display for TableDescription {
                 write!(formatter, ",")?
             }
             if formatter.alternate() {
-                write!(formatter, "\n    {:#}", column)?
+                write!(formatter, "\n    {column:#}")?
             } else {
                 if i > 0 {
                     write!(formatter, " ")?
                 }
-                write!(formatter, "{}", column)?
+                write!(formatter, "{column}")?
+            }
+        }
+        for constraint in self.constraints.iter() {
+            write!(formatter, ",")?;
+            if formatter.alternate() {
+                write!(formatter, "\n    {constraint}")?
+            } else {
+                write!(formatter, " {constraint}")?
             }
         }
         if formatter.alternate() {
@@ -98,7 +109,7 @@ impl fmt::Display for ColumnDescription {
 impl DatabaseDescription {
     #[must_use]
     fn new() -> DatabaseDescription {
-        let query = r#"
+        let tables_query = r#"
             SELECT
                 table_schema::text,
                 table_name::text,
@@ -108,9 +119,9 @@ impl DatabaseDescription {
             WHERE table_schema = ANY(current_schemas(false))
             ORDER BY table_schema, table_name, ordinal_position;
             "#;
-        let tables: Vec<_> = Spi::connect(|client| {
-            client
-                .select(query, None, None)
+        let tables = Spi::connect(|client| {
+            let mut tables: Vec<_> = client
+                .select(tables_query, None, None)
                 .unwrap()
                 .group_by(|row| {
                     (
@@ -128,10 +139,42 @@ impl DatabaseDescription {
                             type_name: row[4].value::<String>().unwrap().unwrap(),
                         })
                         .collect(),
+                    constraints: vec![],
                 })
-                .collect()
+                .collect();
+
+            // TODO: Use a single query to get all constraints
+            let constraint_query = r#"
+            SELECT pg_get_constraintdef(con.oid)
+               FROM pg_catalog.pg_constraint con
+                    INNER JOIN pg_catalog.pg_class rel
+                               ON rel.oid = con.conrelid
+                    INNER JOIN pg_catalog.pg_namespace nsp
+                               ON nsp.oid = connamespace
+               WHERE nsp.nspname = $1 AND rel.relname = $2;
+            "#;
+            for table in tables.iter_mut() {
+                let constraints = client
+                    .select(
+                        constraint_query,
+                        None,
+                        Some(vec![
+                            (
+                                PgBuiltInOids::TEXTOID.oid(),
+                                table.schema.clone().into_datum(),
+                            ),
+                            (
+                                PgBuiltInOids::TEXTOID.oid(),
+                                table.name.clone().into_datum(),
+                            ),
+                        ]),
+                    )
+                    .unwrap()
+                    .map(|row| row[1].value::<String>().unwrap().unwrap());
+                table.constraints.extend(constraints);
+            }
+            tables
         });
-        // TODO: Add primary keys and foreign keys
         return DatabaseDescription { tables };
     }
 }
@@ -147,12 +190,12 @@ fn question_prompt(question: &str) -> Vec<ChatCompletionMessage> {
         },
         ChatCompletionMessage {
             role: ChatCompletionMessageRole::User,
-            content: format!("My database schema looks like this: {db_description}."),
+            content: format!("My Postgres database schema looks like this:\n{db_description:#}."),
             name: None,
         },
         ChatCompletionMessage {
             role: ChatCompletionMessageRole::User,
-            content: format!("Could you give me a PostgreSQL query to {question}. Only respond with the SQL query, so no other additional text."),
+            content: format!("Given that schema, could you give me a PostgreSQL query to do the following action: {question}.\n Only respond with the SQL query, so no other additional text. Only use the tables and columns provided in the schema."),
             name: None,
         },
     ]
@@ -160,19 +203,22 @@ fn question_prompt(question: &str) -> Vec<ChatCompletionMessage> {
 
 async fn complete_prompt(prompt: Vec<ChatCompletionMessage>) -> Result<String> {
     set_key(API_KEY.get().expect("pg_gpt.api_key is not set"));
-    let mut response = ChatCompletion::builder("gpt-3.5-turbo", prompt)
-        .create()
-        .await
-        .unwrap()
-        .unwrap();
+    let request = ChatCompletion::builder("gpt-3.5-turbo", prompt)
+        .create();
+
+    // Sometimes the API seems to get stuck, give up after 10 seconds
+    // TODO: Use statement timeout instead
+    let mut response = timeout(Duration::from_secs(10), request)
+        .await???;
     Ok(response.choices.remove(0).message.content)
 }
 
 #[pg_extern]
 #[tokio::main(flavor = "current_thread")]
-async fn give_me_a_query_to(question: &str) -> Result<String> {
+async fn give_me_a_query_to(question: &str) -> Result<()> {
     let prompt = question_prompt(question);
-    complete_prompt(prompt).await
+    notice!("You can try this query:\n{}", complete_prompt(prompt).await?);
+    Ok(())
 }
 
 #[pg_extern]
