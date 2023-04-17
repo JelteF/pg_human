@@ -2,21 +2,30 @@ use anyhow::Result;
 use itertools::Itertools;
 use openai::{
     chat::{ChatCompletion, ChatCompletionMessage, ChatCompletionMessageRole},
-    set_key,
+    set_api_type, set_base_url, set_key, ApiType,
 };
-use pgx::guc::{GucContext, GucFlags, GucRegistry, GucSetting};
+use pgx::guc::{GucContext, GucFlags, GucRegistry, GucSetting, PostgresGucEnum};
 use pgx::prelude::*;
 use pgx::spi::quote_qualified_identifier;
 use pgx::JsonB;
 use std::fmt;
-use tokio::time::timeout;
 use std::time::Duration;
+use tokio::time::timeout;
 
 pgx::pg_module_magic!();
 
-extension_sql_file!("schema.sql");
+// extension_sql_file!("schema.sql");
+//
+#[derive(PostgresGucEnum, Copy, Clone, Eq, PartialEq)]
+pub enum GucApiType {
+    OpenAi,
+    Azure,
+}
 
 static API_KEY: GucSetting<Option<&'static str>> = GucSetting::new(None);
+static API_TYPE: GucSetting<GucApiType> = GucSetting::new(GucApiType::OpenAi);
+static BASE_URL: GucSetting<Option<&'static str>> =
+    GucSetting::new(Some("https://api.openai.com/v1/"));
 #[pg_guard]
 pub extern "C" fn _PG_init() {
     GucRegistry::define_string_guc(
@@ -24,6 +33,22 @@ pub extern "C" fn _PG_init() {
         "The OpenAI API key that is used by pg_human",
         "The OpenAI API key that is used by pg_human",
         &API_KEY,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+    GucRegistry::define_enum_guc(
+        "pg_human.api_type",
+        "The OpenAI API key that is used by pg_human",
+        "The OpenAI API key that is used by pg_human",
+        &API_TYPE,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+    GucRegistry::define_string_guc(
+        "pg_human.base_url",
+        "The OpenAI base URL that is used by pg_human",
+        "The OpenAI base URL that is used by pg_human",
+        &BASE_URL,
         GucContext::Userset,
         GucFlags::default(),
     );
@@ -185,7 +210,7 @@ fn question_prompt(question: &str) -> Vec<ChatCompletionMessage> {
     vec![
         ChatCompletionMessage {
             role: ChatCompletionMessageRole::System,
-            content: "You are a PostgreSQL expert",
+            content: "You are a PostgreSQL expert".to_string(),
             name: None,
         },
         ChatCompletionMessage {
@@ -195,7 +220,12 @@ fn question_prompt(question: &str) -> Vec<ChatCompletionMessage> {
         },
         ChatCompletionMessage {
             role: ChatCompletionMessageRole::User,
-            content: format!("Given that schema, could you give me a PostgreSQL query to do the following action: {question}.\n Only respond with the SQL code, so no other additional text. Only use the tables and columns provided in the schema."),
+            content: format!("Given that schema, could you give me a PostgreSQL query to do the following action: {question}."),
+            name: None,
+        },
+        ChatCompletionMessage {
+            role: ChatCompletionMessageRole::User,
+            content: "Only respond with the code, so no other additional text. Only use the tables and columns provided in the schema.".to_string(),
             name: None,
         },
     ]
@@ -203,13 +233,18 @@ fn question_prompt(question: &str) -> Vec<ChatCompletionMessage> {
 
 async fn complete_prompt(prompt: Vec<ChatCompletionMessage>) -> Result<String> {
     set_key(API_KEY.get().expect("pg_human.api_key is not set"));
-    let request = ChatCompletion::builder("gpt-3.5-turbo", prompt)
-        .create();
+    let api_type = API_TYPE.get();
+    if api_type == GucApiType::OpenAi {
+        set_api_type(ApiType::OpenAi)
+    } else {
+        set_api_type(ApiType::Azure)
+    }
+    set_base_url(BASE_URL.get().expect("pg_human.base_url is not set"));
+    let request = ChatCompletion::builder("gpt-3.5-turbo", prompt).create();
 
     // Sometimes the API seems to get stuck, give up after 10 seconds
     // TODO: Use statement timeout instead
-    let mut response = timeout(Duration::from_secs(20), request)
-        .await???;
+    let mut response = timeout(Duration::from_secs(60), request).await???;
     Ok(response.choices.remove(0).message.content)
 }
 
@@ -217,7 +252,10 @@ async fn complete_prompt(prompt: Vec<ChatCompletionMessage>) -> Result<String> {
 #[tokio::main(flavor = "current_thread")]
 async fn give_me_a_query_to(question: &str) -> Result<()> {
     let prompt = question_prompt(question);
-    notice!("You can try this query:\n{}", complete_prompt(prompt).await?);
+    notice!(
+        "You can try this query:\n{}",
+        complete_prompt(prompt).await?
+    );
     Ok(())
 }
 
@@ -228,7 +266,7 @@ async fn im_feeling_lucky(
 ) -> Result<TableIterator<'static, (name!(i, i32), name!(data, JsonB))>> {
     let prompt = question_prompt(question);
     let sql = complete_prompt(prompt).await?;
-    let cleaned_sql = sql.trim_end_matches([';', '\n', ' ']);
+    let cleaned_sql = sql.trim_matches('\n').trim_matches('`').trim_end_matches([';', '\n', ' ']);
     notice!("Executing query:\n{sql}");
     // let sql = "SELECT 1 as mynumber";
     Spi::connect(|client| {
@@ -254,16 +292,13 @@ async fn im_feeling_lucky(
 
 #[pg_extern]
 #[tokio::main(flavor = "current_thread")]
-async fn im_feeling_lucky_dml(question: &str) -> Result<()>{
+async fn im_feeling_lucky_dml(question: &str) -> Result<()> {
     let prompt = question_prompt(question);
     let sql = complete_prompt(prompt).await?;
-    notice!("Executing:\n{sql}");
+    let cleaned_sql = sql.trim_matches('\n').trim_matches('`');
+    notice!("Executing:\n{cleaned_sql}");
     Spi::connect(|mut client| {
-        client.update(
-            &sql,
-            None,
-            None,
-        )?;
+        client.update(cleaned_sql, None, None)?;
         Ok(())
     })
 }
