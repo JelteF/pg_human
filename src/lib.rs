@@ -292,7 +292,7 @@ async fn im_feeling_lucky(
 
 #[pg_extern]
 #[tokio::main(flavor = "current_thread")]
-async fn im_feeling_lucky_dml(question: &str) -> Result<()> {
+async fn im_feeling_very_lucky(question: &str) -> Result<()> {
     let prompt = question_prompt(question);
     let sql = complete_prompt(prompt).await?;
     let cleaned_sql = sql.trim_matches('\n').trim_matches('`');
