@@ -41,13 +41,13 @@ ALTER SYSTEM SET pg_human.base_url = 'https://{resource-name-here}.openai.azure.
 
 Only show a query that you can manually copy paste before executing it using
 `give_me_a_query_to()`:
-```sql
+````sql
 SELECT give_me_a_query_to('create tables for a todo app with multiple u
 sers');
 NOTICE:  00000: You can try this query:
 Here's the code:
 
-\`\`\`
+```
 CREATE TABLE public.users (
     id SERIAL PRIMARY KEY,
     name TEXT NOT NULL,
@@ -63,10 +63,10 @@ CREATE TABLE public.tasks (
     completed BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
 );
-\`\`\`
+```
 DETAIL:
 LOCATION:  pg_human::give_me_a_query_to::{{closure}}, lib.rs:255
-```
+````
 
 
 ```sql
