@@ -4,15 +4,15 @@ use openai::{
     chat::{ChatCompletion, ChatCompletionMessage, ChatCompletionMessageRole},
     set_api_type, set_base_url, set_key, ApiType,
 };
-use pgx::guc::{GucContext, GucFlags, GucRegistry, GucSetting, PostgresGucEnum};
-use pgx::prelude::*;
-use pgx::spi::quote_qualified_identifier;
-use pgx::JsonB;
+use pgrx::guc::{GucContext, GucFlags, GucRegistry, GucSetting, PostgresGucEnum};
+use pgrx::prelude::*;
+use pgrx::spi::quote_qualified_identifier;
+use pgrx::JsonB;
 use std::fmt;
 use std::time::Duration;
 use tokio::time::timeout;
 
-pgx::pg_module_magic!();
+pgrx::pg_module_magic!();
 
 // extension_sql_file!("schema.sql");
 //
@@ -373,7 +373,7 @@ CREATE TABLE public.impressions(
     }
 }
 
-/// This module is required by `cargo pgx test` invocations.
+/// This module is required by `cargo pgrx test` invocations.
 /// It must be visible at the root of your extension crate.
 #[cfg(test)]
 pub mod pg_test {

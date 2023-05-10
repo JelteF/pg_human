@@ -9,15 +9,15 @@ advised.
 
 ## How to set this up
 
-One time setup of `cargo pgx`
+One time setup of `cargo pgrx`
 ```bash
-cargo install --locked cargo-pgx
-cargo pgx init
+cargo install --locked cargo-pgrx
+cargo pgrx init
 ```
 
 Run Postgres:
 ```bash
-cargo pgx run
+cargo pgrx run
 ```
 
 Install the extension:
